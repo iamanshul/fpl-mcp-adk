@@ -1,0 +1,7 @@
+# requirements.txt
+fastapi
+uvicorn[standard]
+google-cloud-firestore
+pydantic[dotenv]
+pydantic-settings
+requests
