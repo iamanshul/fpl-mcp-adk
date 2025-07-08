@@ -2,11 +2,36 @@
 import requests
 from app.core.config import get_settings
 from app.crud import crud_fpl
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Callable
+from datetime import datetime, timezone, timedelta
+
 
 settings = get_settings()
 
-def fetch_from_fpl_api(endpoint: str) -> List[Dict[str, Any]]| None:
+def _is_data_stale(data_type: str) -> bool:
+    """
+    Checks if the data for a given type is stale based on the last sync time.
+    """
+    last_sync_time = crud_fpl.get_sync_metadata(data_type)
+    if not last_sync_time:
+        print(f"No sync metadata found for '{data_type}'. Data is considered stale.")
+        return True
+    
+    # Ensure last_sync_time is timezone-aware for correct comparison
+    if last_sync_time.tzinfo is None:
+        last_sync_time = last_sync_time.replace(tzinfo=timezone.utc)
+
+    time_since_sync = datetime.now(timezone.utc) - last_sync_time
+    is_stale = time_since_sync > timedelta(hours=settings.SYNC_INTERVAL_HOURS)
+    
+    if is_stale:
+        print(f"Data for '{data_type}' is stale (last sync: {time_since_sync} ago).")
+    else:
+        print(f"Data for '{data_type}' is fresh (last sync: {time_since_sync} ago). Skipping sync.")
+        
+    return is_stale
+
+def fetch_from_fpl_api(endpoint: str) -> List[Dict[str, Any]]| Dict[str, Any] | None:
     """Fetches data from a specified FPL API endpoint."""
     url = f"{settings.FPL_API_BASE_URL}/{endpoint}"
     print(f"Fetching data from {url}")
@@ -28,8 +53,8 @@ def calculate_and_sync_standings():
     print("Calculating and syncing Premier League standings...")
     try:
         # Instead of querying a DB, we get data from our Firestore cache
-        teams = crud_fpl.get_all_teams()
-        finished_games = [f for f in crud_fpl.get_all_fixtures() if f.get('finished')]
+        teams = crud_fpl.get_all_from_collection("teams")
+        finished_games = [f for f in crud_fpl.get_all_from_collection("fixtures") if f.get('finished')]
 
         if not teams:
             print("Error: No teams found in Firestore for standings calculation.")
@@ -98,6 +123,37 @@ def calculate_and_sync_standings():
 
     except Exception as e:
         print(f"An unexpected error occurred while updating standings: {e}")
+        
+def _sync_data_type(collection_name: str, id_key: str, fetch_func: Callable[[], List[Dict[str, Any]]]):
+    """
+    Generic function to handle the sync process for a single data type.
+    Checks for staleness, deletes old data, fetches new data, and writes it.
+    """
+    if _is_data_stale(collection_name):
+        print(f"Proceeding with sync for '{collection_name}'...")
+        
+        # 1. Fetch new data from the FPL API
+        new_data = fetch_func()
+        if not new_data:
+            print(f"Sync failed for '{collection_name}': No data fetched.")
+            return
+
+        # 2. Delete all old documents from the collection
+        print(f"Deleting all existing documents from '{collection_name}' collection...")
+        crud_fpl.delete_collection(collection_name)
+        print(f"Deletion complete for '{collection_name}'.")
+
+        # 3. Write the new data to the collection
+        print(f"Writing {len(new_data)} new documents to '{collection_name}'...")
+        crud_fpl.batch_upsert_data(collection_name, new_data, id_key)
+        print(f"Write complete for '{collection_name}'.")
+
+        # 4. Update the sync metadata timestamp
+        crud_fpl.update_sync_metadata(collection_name)
+        print(f"Sync metadata updated for '{collection_name}'.")
+    else:
+        # If data is not stale, we do nothing.
+        pass
 
 def sync_all_fpl_data():
     """
@@ -109,31 +165,14 @@ def sync_all_fpl_data():
     
     bootstrap_data = fetch_from_fpl_api("bootstrap-static/")
     if bootstrap_data:
-        try:
-            players = bootstrap_data.get("elements", [])
-            if players:
-                print(f"Upserting {len(players)} players...")
-                crud_fpl.batch_upsert_data("players", players, "id")
-            teams = bootstrap_data.get("teams", [])
-            if teams:
-                print(f"Upserting {len(teams)} teams...")
-                crud_fpl.batch_upsert_data("teams", teams, "id")
-            gameweeks = bootstrap_data.get("events", [])
-            if gameweeks:
-                print(f"Upserting {len(gameweeks)} gameweeks...")
-                crud_fpl.batch_upsert_data("gameweeks", gameweeks, "id")
-        except Exception as e:
-           print(f"Error upserting data: {e}")
-           
-    fixtures_data = fetch_from_fpl_api("fixtures/")
-    if fixtures_data:
-        try:
-            print(f"Upserting {len(fixtures_data)} fixtures...")
-            crud_fpl.batch_upsert_data("fixtures", fixtures_data, "id")
-        except Exception as e:
-            print(f"Error upserting data: {e}")
+        _sync_data_type("players", "id", lambda: bootstrap_data.get("elements",))
+        _sync_data_type("teams", "id", lambda: bootstrap_data.get("teams",))
+        _sync_data_type("gameweeks", "id", lambda: bootstrap_data.get("events",))
+    else:
+        print("Could not fetch bootstrap data. Skipping related syncs.")
     
-  #  standings_data = fetch_from_fpl_api("standings/") commenting for now. need to check
+    _sync_data_type("fixtures", "id", lambda: fetch_from_fpl_api("fixtures"))
+
     calculate_and_sync_standings()
     
     print("FPL data synchronization complete.")

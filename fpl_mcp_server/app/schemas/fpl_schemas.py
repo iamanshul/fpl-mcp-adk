@@ -1,33 +1,40 @@
 #app/schemas/fpl_schema.py
 import datetime
-from pydantic import BaseModel
-from typing import Optional, List
+from pydantic import BaseModel, ConfigDict, Field, computed_field
+from typing import Optional, List, Dict, Any
+from datetime import datetime
 
-class OrmConfig:
-    """Pydantic config to allow mapping from ORM objects or dicts."""
-    orm_mode = True
+
+SharedModelConfig = ConfigDict(from_attributes=True)
 
 class Team(BaseModel):
-    id = int
+    id : int
     name:str
     short_name:str
-    class Config(OrmConfig):
-        #this allows the Pydantic model to be created from arbitary class instances
-        #which is useful when mapping from database objects
-        pass
+    code: int
+    strength: int
+    strength_overall_home: int
+    strength_overall_away: int
+    strength_attack_home: int
+    strength_attack_away: int
+    strength_defence_home: int
+    strength_defence_away: int
+    pulse_id: int # Or whatever the actual field name for pulse ID is
+    model_config = SharedModelConfig
+
         
 class Player(BaseModel):
     id: int
-    player_name: str # Matches SQLite
+    code: int
+    element_type: int # FPL API: integer ID for position (1=GK, 2=DEF, 3=MID, 4=FWD)
+    event_points: int # FPL API: points from the most recent gameweek
+    first_name: str
+    second_name: str
     web_name: str
-    team: str # Matches SQLite (team name)
-    position: str # Matches SQLite (e.g., "Goalkeeper")
-    cost: float # Matches SQLite type
+    team: int # FPL API: ID of the team the player belongs to
+    team_code: int # FPL API: Numeric code for the team
+    now_cost: int # FPL API: player's current cost in pence (e.g., 41 for 4.1m)
     total_points: int
-    last_game_points: int # Matches SQLite
-    points_per_game: float # Matches SQLite type
-    selected_by_percent: float # Matches SQLite type
-    form: float # Matches SQLite type
     minutes: int
     goals_scored: int
     assists: int
@@ -36,43 +43,75 @@ class Player(BaseModel):
     yellow_cards: int
     red_cards: int
     penalties_saved: int
+    penalties_missed: int
     saves: int
     bonus: int
     bps: int
-    ict_index: float # Matches SQLite type
-    starts_per_90: float # Matches SQLite
-    status: str # Matches SQLite
-    chance_of_playing_this_round: Optional[float] = None # Matches SQLite type
-    news: str
-    news_added: Optional[str] = None # SQLite stores as TEXT, Pydantic can parse datetime from string
+    form: str # FPL API: typically a string float (e.g., "1.5")
+    points_per_game: str # FPL API: typically a string float (e.g., "2.3")
+    selected_by_percent: str # FPL API: typically a string float (e.g., "0.1")
+    influence: str # FPL API: string float
+    creativity: str # FPL API: string float
+    threat: str # FPL API: string float
+    ict_index: str # FPL API: string float
+    chance_of_playing_this_round: Optional[int] = None # FPL API: 0, 50, 75, 100
+    chance_of_playing_next_round: Optional[int] = None # FPL API: 0, 50, 75, 100
+    ep_next: Optional[str] = None # FPL API: expected points next gameweek (string float)
+    ep_this: Optional[str] = None # FPL API: expected points this gameweek (string float)
+    news: str # Player news/injury status
+    news_added: Optional[datetime] = None # Timestamp of news update
 
-    # Important fields from SQLite's players table for optimization:
-    fixture_difficulty: Optional[float] = None # Matches SQLite
-    recent_form: Optional[float] = None # Matches SQLite
-    next_game_opponent: Optional[str] = None # Matches SQLite
-    is_home: Optional[int] = None # Matches SQLite (0 or 1)
+    # Fields that your previous SQLite schema used for optimization (derived/calculated in your sync).
+    # If these are stored as distinct fields in Firestore, keep them. Otherwise, consider if they should be computed fields.
+    fixture_difficulty: Optional[float] = None
+    recent_form: Optional[float] = None
+    next_game_opponent: Optional[str] = None
+    is_home: Optional[int] = None # 0 or 1
     
-    class Config:
-        orm_mode = True
+    model_config = SharedModelConfig
+    _POSITION_MAP = {
+        1: "Goalkeeper",
+        2: "Defender",
+        3: "Midfielder",
+        4: "Forward",
+    }
+    @computed_field
+    @property
+    def player_name(self) -> str:
+        return f"{self.first_name} {self.second_name}"
+    @computed_field
+    @property
+    def position(self) -> str:
+        return self._POSITION_MAP.get(self.element_type, "Unknown")
+    @computed_field
+    @property
+    def cost(self) -> float:
+        return self.now_cost / 10.0 # Convert pence to pounds
+    @computed_field
+    @property
+    def last_game_points(self) -> int:
+        return self.event_points
+
         
 class Fixture(BaseModel):
     id: int
-    gameweek: Optional[int] # Matches SQLite column name 'gameweek'
-    home_team: str        # Matches SQLite column 'home_team'
-    away_team: str        # Matches SQLite column 'away_team'
-    home_team_score: Optional[int]
-    away_team_score: Optional[int]
-    kickoff_time: Optional[datetime]
-    team_h_difficulty: int
-    team_a_difficulty: int
+    code: int
+    event: Optional[int]
     finished: bool
-     # 'stats' is likely from the raw FPL API response, not directly stored in pl_schedule
-    # Keep it if you use this model to process the raw API fixture data
-    stats: List[Dict[str, Any]] = [] # Example: List of generic stat dictionaries
-    class Config(OrmConfig):
-        pass
+    kickoff_time: Optional[datetime]
+    team_h: int # Matches FPL API: Home team ID (required)
+    team_a: int # Matches FPL API: Away team ID (required)
+    team_h_score: Optional[int] = None # Matches FPL API: Home team score (Optional, as it's None for future games)
+    team_a_score: Optional[int] = None # Matches FPL API: Away team score (Optional, as it's None for future games)
+
+    team_h_difficulty: int # Matches FPL API: Home team's fixture difficulty (1-5)
+    team_a_difficulty: int # Matches FPL API: Away team's fixture difficulty (1-5)
     
-class GameStats(BaseModel):
+    # 'stats' field is a list of dictionaries with complex structure.
+    stats: List[Dict[str, Any]] = []
+    model_config = SharedModelConfig
+    
+class GameStat(BaseModel):
     """
     Represents the overall game statistics, likely from the FPL API's 'bootstrap-static' endpoint.
     This model aggregates various data points like phases, elements (players), teams, and events (gameweeks).
@@ -91,8 +130,7 @@ class GameStats(BaseModel):
     bonus: int = 0
     bps: int = 0
     minutes: int = 0
-    class Config(OrmConfig):
-        pass
+    model_config = SharedModelConfig
 
 class Standing(BaseModel):
     position: int
@@ -107,24 +145,47 @@ class Standing(BaseModel):
     goal_difference: int
     points: int
     
-    class Config(OrmConfig):
-        pass
+    model_config = SharedModelConfig
     
 # The Gameweek model seems to reflect FPL API's "event" data, not a SQLite table in your schema.
 # It's fine if its purpose is to process that specific API endpoint.
 class Gameweek(BaseModel):
-    team_name: str
-    played: int = 0
-    wins: int = 0
-    draws: int = 0
-    losses: int = 0
-    goals_for: int = 0
-    goals_against: int = 0
-    goal_difference: int = 0
-    points: int = 0
+    id: int
+    name: str
+    deadline_time: datetime
+    deadline_time_epoch: Optional[int] = None # Ensure this is Optional
+    average_entry_score: int
+    finished: bool
+    data_checked: bool
+    highest_scoring_entry: Optional[int] = None
+    highest_score: Optional[int] = None
+    deadline_time_game_offset: Optional[int] = None # Ensure this is Optional
 
-    class Config(OrmConfig):
-        pass
+    # FIX: These MUST be Optional, as the data sometimes does not include them.
+    deadline_time_formatted: Optional[str] = None
+    finished_provisional: Optional[bool] = None
+
+    is_previous: bool
+    is_current: bool
+    is_next: bool
+
+    # Other fields from FPL 'events' that might be present:
+    can_enter: Optional[bool] = None
+    top_element: Optional[int] = None
+    top_element_info: Optional[Dict[str, Any]] = None
+    transfers_made: Optional[int] = None
+    chip_plays: Optional[List[Dict[str, Any]]] = None
+    most_vice_captained: Optional[int] = None
+    h2h_ko_matches_created: Optional[bool] = None
+    release_time: Optional[datetime] = None # Or Optional[str] if stored as string/epoch
+    cup_leagues_created: Optional[bool] = None
+    most_selected: Optional[int] = None
+    most_captained: Optional[int] = None
+    most_transferred_in: Optional[int] = None
+    overrides: Optional[Dict[str, Any]] = None
+
+
+    model_config = SharedModelConfig
 
     
 
@@ -132,10 +193,7 @@ class Gameweek(BaseModel):
 # It inherits from the Player schema and adds extra, related information.
 
 class PlayerContext(Player):
-    # Here, team_details might refer to the *full* FPL API Team object, not the slim DB Team.
-    # If so, you'd need a separate Team model that includes all the FPL API fields.
-    # For now, let's assume it's still referring to the slim Team if fetched from DB joins.
-    # If this is for API response building, you'd put the full FPL API Team data here.
+
     team_details: Optional[Team] = None # This depends on what data you combine.
 
     # This assumes Fixture model represents API fixtures or joined DB fixtures

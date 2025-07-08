@@ -1,5 +1,5 @@
 #app/core/config.py
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
 
 
@@ -13,11 +13,9 @@ class Settings(BaseSettings):
     """
     GCP_PROJECT_ID: str
     FPL_API_BASE_URL: str
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-
+    SYNC_INTERVAL_HOURS: int = 0
+    SYNC_SECRET: str
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
 @lru_cache()
 def get_settings() -> Settings:
