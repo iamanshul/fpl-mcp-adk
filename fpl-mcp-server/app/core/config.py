@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     """
     GCP_PROJECT_ID: str
     FPL_API_BASE_URL: str
-    SYNC_INTERVAL_HOURS: int = 0
+    SYNC_INTERVAL_HOURS: int = 2
     SYNC_SECRET: str
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

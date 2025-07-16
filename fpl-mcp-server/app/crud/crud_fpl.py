@@ -177,3 +177,48 @@ def get_current_gameweek() -> Optional[int]:
         return doc.to_dict().get('id')
     
     return None # No current gameweek found
+
+def search_players(name: str = None, team: str = None, position: str = None) -> List[Dict[str, Any]]:
+    """
+    Searches for players based on name, team, and/or position.
+    The search is case-insensitive and performs partial matches on names.
+    """
+    print(f"Searching for players with name: {name}, team: {team}, position: {position}")
+    filtered_players = get_all_players()
+    if name:
+        filtered_players = [p for p in filtered_players if name.lower() in p.get('first_name', '').lower()]
+        
+    if team:
+        all_teams = get_all_from_collection("teams")
+        team_id = next((t['id'] for t in all_teams if t['name'].lower() == team.lower()), None)
+        if team_id:
+            filtered_players = [p for p in filtered_players if p.get('team') == team_id]
+        else:
+            return []
+        
+    if position:
+        position_map = {'goalkeeper': 1, 'defender': 2, 'midfielder': 3, 'forward': 4}
+        position_id = position_map.get(position.lower())
+        if position_id:
+            filtered_players = [p for p in filtered_players if p.get('element_type') == position_id]
+        else:
+            return []
+    
+    return filtered_players
+
+def search_teams(name: str = None) -> List[Dict[str, Any]]:
+    """
+    Searches for teams by name (case-insensitive, partial match).
+    """
+    print(f"Searching for teams with name: {name}")
+    all_teams = get_all_teams()
+    if name:
+        return [t for t in all_teams if name.lower() in t.get('name', '').lower()]
+    else:
+        return []
+
+
+    
+    
+    
+    

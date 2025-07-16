@@ -115,7 +115,6 @@ def read_player_context(player_id: int):
     return context
 
 
-# --- New Sync Endpoint ---
 @router.post("/sync", summary="Trigger FPL data synchronization", tags=["Admin"], status_code=status.HTTP_200_OK)
 async def sync_data(api_key: str = Depends(get_api_key)): # Add Depends(get_api_key) for authentication
     """
@@ -123,12 +122,6 @@ async def sync_data(api_key: str = Depends(get_api_key)): # Add Depends(get_api_
     Requires an API key in the 'X-API-Key' header.
     """
     try:
-        # It's better to run sync_all_fpl_data in a background task to avoid timeout issues
-        # with long-running sync operations on Cloud Run.
-        # However, for simplicity and direct testing, calling it directly is fine for now.
-        # If sync_all_fpl_data itself makes I/O calls, it might need to be awaited
-        # if it's an async function, or run in a thread pool if it's sync blocking.
-        # Since sync_all_fpl_data is likely blocking I/O, it's best to run it in a threadpool.
         from starlette.concurrency import run_in_threadpool
         await run_in_threadpool(sync_all_fpl_data)
 
@@ -136,3 +129,28 @@ async def sync_data(api_key: str = Depends(get_api_key)): # Add Depends(get_api_
     except Exception as e:
         print(f"Error during FPL data synchronization: {e}")
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to trigger sync: {e}")
+    
+@router.get("/players/search/", response_model=List[fpl_schemas.Player], tags=["Players"])
+def search_players_endpoint(
+    name: Optional[str] = Query(None, description="Search players by name (case-insensitive)"),
+    team: Optional[str] = Query(None, description="Search players by team name (case-insensitive)"),
+    position: Optional[str] = Query(None, description="Filter players by position (Goalkeeper, Defender, Midfielder, Forward)"),
+):
+    """
+    Search for players with multiple filter criteria.
+    """
+    players = crud_fpl.search_players(name=name, team=team, position=position)
+    # It's better to return an empty list than a 404 if no players match the filter
+    return players
+
+@router.get("/teams/search/", response_model=List[fpl_schemas.Team], tags=["Teams"])
+def search_teams_endpoint(
+    name: str = Query(..., min_length=2, description="Search teams by name (case-insensitive)")
+):
+    """
+    Search for a team by its name.
+    """
+    teams = crud_fpl.search_teams(name=name)
+    if not teams:
+        raise HTTPException(status_code=404, detail="No team found matching that name")
+    return teams
