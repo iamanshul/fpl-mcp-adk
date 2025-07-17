@@ -1,0 +1,14 @@
+Metadata-Version: 2.4
+Name: fpl-agent
+Version: 0.1.0
+Summary: FPL assistant using ADK
+Requires-Python: >=3.9
+Requires-Dist: google-adk
+Requires-Dist: requests
+Requires-Dist: python-dotenv
+Provides-Extra: test
+Requires-Dist: pytest; extra == "test"
+Requires-Dist: pytest-asyncio; extra == "test"
+Requires-Dist: requests-mock; extra == "test"
+Requires-Dist: google-cloud-aiplatform[evaluation]; extra == "test"
+Requires-Dist: google-adk[eval]; extra == "test"

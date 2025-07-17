@@ -1,0 +1,31 @@
+[project]
+name = "fpl-agent"
+version = "0.1.0"
+description = "FPL assistant using ADK"
+requires-python = ">=3.9"
+dependencies = [
+    "google-adk",
+    "requests",
+    "python-dotenv",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest",
+    "pytest-asyncio",
+    "requests-mock",
+    "google-cloud-aiplatform[evaluation]", 
+    "google-adk[eval]",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = [
+    "tests",
+    "eval", # <-- Also add the eval path here
+]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["fpl_agent*"]
+exclude = ["tests*", "eval*", "deployment*"]

@@ -1,0 +1,23 @@
+[
+  {
+    "id": "fpl_eval_001",
+    "query": "show me midfielders from chelsea",
+    "expected_tool_calls": ["search_players"],
+    "expected_output_contains": ["Palmer", "Chelsea", "Midfielder"],
+    "expected_output_not_contains": ["Error", "cannot find"]
+  },
+  {
+    "id": "fpl_eval_002",
+    "query": "any news on Salah's injury?",
+    "expected_tool_calls": ["google_search"],
+    "expected_output_contains": ["Salah", "injury"],
+    "expected_output_not_contains": ["Error", "cannot answer"]
+  },
+  {
+    "id": "fpl_eval_003",
+    "query": "who are the top performers?",
+    "expected_tool_calls": ["get_top_performers"],
+    "expected_output_contains": ["Haaland", "Salah"],
+    "expected_output_not_contains": ["Error"]
+  }
+]
