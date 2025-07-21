@@ -1,87 +1,53 @@
-# FPL Agent
+## Deployment on Vertex AI Agent Engine
 
-The FPL Agent is an intelligent assistant designed to help users get information about the Fantasy Premier League. It can provide player stats, find top performers, search for specific players or teams, and fetch the latest news.
+To deploy the agent to Google Agent Engine, first follow
+[these steps](https://cloud.google.com/vertex-ai/generative-ai/docs/agent-engine/set-up)
+to set up your Google Cloud project for Agent Engine.
 
-This agent is built using the Google Agent Development Kit (ADK) and connects to a custom FPL Model Context Protocol (MCP) server for its data.
+Next, you need to create a `.whl` file for your agent. From the `fpl-agent`
+directory, run this command:
 
-## Features
+```bash
+poetry build --format=wheel --output=deployment
+```
 
-* **Player & Team Search:** Find players by name, team, or position. Look up information on specific teams.
-* **Performance Metrics:** Get a list of the top-performing players based on total points.
-* **Web Search:** Fetches the latest news, injury updates, and transfer rumors using a dedicated Google Search sub-agent.
-* **Configurable:** The agent's model can be configured via a `.env` file.
+This will create a file named `fpl_agent-0.1-py3-none-any.whl` in the
+`deployment` directory.
 
-## Project Structure
-fpl-agent/
-|-- deployment/
-|   |-- Dockerfile
-|-- eval/
-|   |-- fpl_eval_set_001.evalset.json
-|-- fpl_agent/
-|   |-- init.py
-|   |-- agent.py
-|   |-- prompts.py
-|   |-- tools/
-|-- tests/
-|   |-- test_tools.py
-|-- .dockerignore
-|-- .env
-|-- pyproject.toml
-|-- README.md
+Then run the below command. This will create a staging bucket in your GCP project and deploy the agent to Vertex AI Agent Engine:
 
+```bash
+python3 deployment/deploy.py --create
+```
 
-## Setup and Installation
+When this command returns, if it succeeds it will print an AgentEngine resource
+name that looks something like this:
+```
+projects/************/locations/us-central1/reasoningEngines/7737333693403889664
+```
+The last sequence of digits is the AgentEngine resource ID.
 
-1.  **Clone the repository** (or ensure you are in the project's root directory).
-2.  **Create and activate a Python virtual environment:**
-    ```bash
-    python -m venv .venv
-    source .venv/bin/activate
-    ```
-3.  **Install dependencies in editable mode:**
-    ```bash
-    pip install -e ".[test]"
-    ```
-4.  **Create your `.env` file:**
-    ```bash
-    echo "ROOT_AGENT_MODEL='gemini-1.5-flash'" > .env
-    ```
+Once you have successfully deployed your agent, you can interact with it
+using the `test_deployment.py` script in the `deployment` directory. Store the
+agent's resource ID in an environment variable and run the following command:
 
-## Running Locally
+```bash
+export RESOURCE_ID=...
+export USER_ID=<any string>
+python test_deployment.py --resource_id=$RESOURCE_ID --user_id=$USER_ID
+```
 
-To run the full system locally, you need three separate terminal windows.
+The session will look something like this:
+```
+Found agent with resource ID: ...
+Created session for user ID: ...
+Type 'quit' to exit.
+Input: Who is the most selected player right now?
+Response: The most selected player is...
+...
+```
 
-1.  **Terminal 1: Start the Firestore Emulator**
-    ```bash
-    gcloud emulators firestore start --host-port=localhost:8950
-    ```
-
-2.  **Terminal 2: Start the FPL MCP Server**
-    ```bash
-    cd /path/to/your/fpl-mcp-server
-    export FIRESTORE_EMULATOR_HOST=localhost:8950
-    uvicorn app.main:app --reload
-    ```
-
-3.  **Terminal 3: Run the FPL Agent**
-    * For an interactive command-line interface:
-        ```bash
-        cd /path/to/your/fpl-agent
-        adk run fpl_agent
-        ```
-    * For the web interface:
-        ```bash
-        cd /path/to/your/fpl-agent
-        adk web --port 8001
-        ```
-
-## Testing and Evaluation
-
-* **To run unit tests:**
-    ```bash
-    pytest
-    ```
-* **To run the evaluation set:**
-    ```bash
-    adk eval fpl_agent eval/fpl_eval_set_001.evalset.json
-    ```
+To delete the agent, run the following command (using the resource ID returned previously):
+```bash
+python3 deployment/deploy.py --delete --resource_id=RESOURCE_ID
+```
