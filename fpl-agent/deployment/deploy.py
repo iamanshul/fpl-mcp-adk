@@ -138,10 +138,17 @@ def create(env_vars: dict[str, str]) -> None:
 
     remote_agent = agent_engines.create(
         adk_app,
-        requirements=[AGENT_WHL_FILE, "google-adk==1.5.0"], # Explicitly specify google-adk version
+        requirements=[AGENT_WHL_FILE, 
+                      "google-adk==1.5.0",
+                      "requests",
+                      "google-auth",
+                      "python-dotenv",
+                      "pulp"], 
         extra_packages=[AGENT_WHL_FILE],
         env_vars=env_vars
     )
+    
+    
     logger.info("Created remote agent: %s", remote_agent.resource_name)
     print(f"\nSuccessfully created agent: {remote_agent.resource_name}")
 
@@ -188,6 +195,10 @@ def main(argv: list[str]) -> None:  # pylint: disable=unused-argument
     # Don't set "GOOGLE_CLOUD_PROJECT" or "GOOGLE_CLOUD_LOCATION"
     # when deploying to Agent Engine. Those are set by the backend.
     env_vars["FPL_TEAM_ID"] = os.getenv("FPL_TEAM_ID")
+    env_vars["ROOT_AGENT_MODEL"] = os.getenv("ROOT_AGENT_MODEL")
+    env_vars["MCP_SERVER_URL"] = os.getenv("MCP_SERVER_URL")
+    env_vars["MCP_API_KEY"] = os.getenv("MCP_API_KEY") # 3. Add the API Key
+
     
 
     logger.info("Using PROJECT: %s", project_id)

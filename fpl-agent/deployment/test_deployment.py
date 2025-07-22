@@ -106,6 +106,12 @@ def main(argv: list[str]) -> None:  # pylint: disable=unused-argument
                         if "text" in part:
                             text_part = part["text"]
                             print(f"Response: {text_part}")
+                        elif "function_call" in part:
+                            function_call = part["function_call"]
+                            print(f"Tool Call: {function_call['name']}({function_call['args']})")
+                        elif "function_response" in part:
+                            function_response = part["function_response"]
+                            print(f"Tool Response: {function_response['name']} -> {function_response['response']}")
 
     asyncio.run(session_service.delete_session(
         app_name=FLAGS.resource_id,
