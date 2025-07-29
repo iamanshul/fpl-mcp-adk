@@ -246,7 +246,7 @@ def get_optimized_fpl_team(formation: str = "4-4-2", budget: int = 100) -> str:
         prob += pulp.lpSum([float(p['form']) * player_vars[p['id']] for p in players])
 
         # Constraints
-        prob += pulp.lpSum([p['cost'] * player_vars[p['id']] for p in players]) <= budget * 10
+        prob += pulp.lpSum([p['cost'] * player_vars[p['id']] for p in players]) <= budget
         
         # Positional constraints based on formation
         formation_map = {
@@ -272,6 +272,9 @@ def get_optimized_fpl_team(formation: str = "4-4-2", budget: int = 100) -> str:
 
         prob.solve(pulp.PULP_CBC_CMD(msg=False))
         
+        if pulp.LpStatus[prob.status] != 'Optimal':
+            return json.dumps({"error": "Could not find an optimal team for the given budget and formation. Please try a different formation or a higher budget."})
+
         # 3. Format the result
         selected_players_output = {
             "formation": formation,
@@ -280,8 +283,10 @@ def get_optimized_fpl_team(formation: str = "4-4-2", budget: int = 100) -> str:
         total_cost = 0
         for p in players:
             if player_vars[p['id']].varValue == 1:
-                selected_players_output[p['position'] + 's'].append(f"{p['web_name']} ({p['cost']/10.0}m)")
-                total_cost += p['cost']
+                position_key = p['position'] + 's'
+                if position_key in selected_players_output:
+                    selected_players_output[position_key].append(f"{p['web_name']} ({p['cost']/10.0}m)")
+                    total_cost += p['cost']
         
         selected_players_output["total_cost"] = f"£{total_cost/10.0:.1f}m"
         selected_players_output["status"] = "Team selected successfully"
