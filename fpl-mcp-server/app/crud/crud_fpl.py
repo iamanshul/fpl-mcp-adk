@@ -1,224 +1,198 @@
-#app/crud/crud_fpl.py
-from google.cloud import firestore
-from app.core.config import get_settings
-from typing import Optional, List, Dict, Any
+# Copyright 2025 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+# Author: Anshul Kapoor
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""
+This module contains all the CRUD (Create, Read, Update, Delete) operations
+for interacting with the Firestore database for the FPL application.
+
+It handles fetching and updating data for players, teams, gameweeks, and 
+synchronization metadata.
+"""
+
+import logging
 from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
+from google.cloud import firestore
 
+from app.core.config import get_settings
 
 settings = get_settings()
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-#Initiate the Firestore client
 try:
     db = firestore.Client(project=settings.GCP_PROJECT_ID)
+    logging.info("Successfully connected to Firestore.")
 except Exception as e:
-    print(f"Error connecting to Firestore: {e}")
+    logging.error("Error connecting to Firestore: %s", e)
     db = None
-    
+
 def get_player_by_id(player_id: int) -> Optional[Dict[str, Any]]:
-    """ Retrieves the single player document from the 'players' collection in Firestore
-"""
+    """Retrieves a single player document from Firestore by their ID."""
     if not db:
         return None
-    else:
-        doc_ref = db.collection('players').document(str(player_id))
-        doc = doc_ref.get()
-    if doc.exists:
-        return doc.to_dict()
-    else:
-        return None
+    doc_ref = db.collection("players").document(str(player_id))
+    doc = doc_ref.get()
+    return doc.to_dict() if doc.exists else None
 
 def get_team_by_id(team_id: int) -> Optional[Dict[str, Any]]:
-    """ Retrieves the single team document from the 'teams' collection in Firestore
-"""
+    """Retrieves a single team document from Firestore by their ID."""
     if not db:
         return None
-    else:
-        doc_ref = db.collection('teams').document(str(team_id))
-        doc = doc_ref.get()
-    if doc.exists:
-        return doc.to_dict()
-    else:
-        return None
+    doc_ref = db.collection("teams").document(str(team_id))
+    doc = doc_ref.get()
+    return doc.to_dict() if doc.exists else None
 
 def get_all_players() -> List[Dict[str, Any]]:
-    """ Retrieves all players from the 'players' collection in Firestore
-"""
+    """Retrieves all player documents from the 'players' collection."""
     if not db:
         return []
-    else:
-        docs = db.collection('players').stream()
-    players_ref = db.collection('players')
-    docs = players_ref.stream()
+    docs = db.collection("players").stream()
     return [doc.to_dict() for doc in docs]
-
 
 def batch_upsert_data(collection_name: str, data: List[Dict[str, Any]], id_key: str):
     """
-    Performs a batch upsert operation for a list of documents into a specified collection.
-    'Upsert' means it will create a new document or overwrite an existing one.
-    This function processes data in chunks to respect Firestore's 500-operation limit per batch.
-    """
-    if not db: # Add check for db
-        raise ConnectionError("Firestore client not initialized. Cannot perform batch upsert.")
-
-    batch = db.batch()
-    count = 0
-    for item in data:
-        doc_id_value = item.get(id_key)
-        if not doc_id_value:
-            continue # Skip items without a valid ID key
-
-        doc_id = str(doc_id_value) # Use doc_id for consistency
-        doc_ref = db.collection(collection_name).document(doc_id) # Use doc_id
-
-        batch.set(doc_ref, item, merge=True)
-        count += 1
-
-        # Commit the batch when it's full (500 operations)
-        if count == 500: # Changed from 499 to 500
-            print(f"Committing batch of {count} documents to '{collection_name}'...")
-            batch.commit()
-            batch = db.batch() # Start a new batch
-            count = 0
-
-    # Commit any remaining operations in the final batch, outside the loop
-    if count > 0:
-        print(f"Committing final batch of {count} documents to '{collection_name}'...")
-        batch.commit()
-            
-def delete_collection(collection_name: str, batch_size: int = 500):
-    """
-    Deletes all documents in a collection in batches.
+    Performs a batch upsert (update or insert) operation into a Firestore collection.
+    Handles Firestore's 500-operation limit per batch.
     """
     if not db:
         raise ConnectionError("Firestore client not initialized.")
 
+    batch = db.batch()
+    count = 0
+    for item in data:
+        if not (doc_id_value := item.get(id_key)):
+            continue
+
+        doc_ref = db.collection(collection_name).document(str(doc_id_value))
+        batch.set(doc_ref, item, merge=True)
+        count += 1
+
+        if count == 500:
+            logging.info("Committing batch of %d documents to '%s'...", count, collection_name)
+            batch.commit()
+            batch = db.batch()
+            count = 0
+
+    if count > 0:
+        logging.info("Committing final batch of %d documents to '%s'...", count, collection_name)
+        batch.commit()
+
+def delete_collection(collection_name: str, batch_size: int = 500):
+    """Deletes all documents within a specified Firestore collection in batches."""
+    if not db:
+        raise ConnectionError("Firestore client not initialized.")
+
     coll_ref = db.collection(collection_name)
-    # Use a loop that keeps fetching until no more documents are found
     while True:
         docs = coll_ref.limit(batch_size).stream()
         deleted_in_batch = 0
-
-        batch_to_delete = db.batch() # Use a batch for deletion too!
+        batch_to_delete = db.batch()
         for doc in docs:
             batch_to_delete.delete(doc.reference)
             deleted_in_batch += 1
 
         if deleted_in_batch > 0:
             batch_to_delete.commit()
-            print(f"Deleted {deleted_in_batch} documents from '{collection_name}'.")
+            logging.info("Deleted %d documents from '%s'.", deleted_in_batch, collection_name)
 
-        if deleted_in_batch < batch_size: # If less than a full batch was found, we're done
+        if deleted_in_batch < batch_size:
             break
 
 def get_sync_metadata(data_type: str) -> Optional[datetime]:
-    """
-    Retrieves the last synchronization timestamp for a given data type.
-    """
+    """Retrieves the last synchronization timestamp for a given data type."""
     if not db:
         return None
-    doc_ref = db.collection('sync_metadata').document(data_type)
+    doc_ref = db.collection("sync_metadata").document(data_type)
     doc = doc_ref.get()
     if doc.exists:
-        return doc.to_dict().get('last_updated_at')
-    else:
-        return None
+        return doc.to_dict().get("last_updated_at")
+    return None
 
 def update_sync_metadata(data_type: str):
-    """
-    Updates the synchronization timestamp for a given data type to the current time.
-    """
-    if not db: raise ConnectionError("Firestore client not initialized.")
+    """Updates the synchronization timestamp for a given data type to the current time."""
+    if not db:
+        raise ConnectionError("Firestore client not initialized.")
     doc_ref = db.collection("sync_metadata").document(data_type)
-    # Use server_timestamp for accuracy, but fallback to client time if needed.
-    # For this implementation, client UTC time is sufficient.
     doc_ref.set({"last_updated_at": datetime.now(timezone.utc)})
 
-
-            
-def get_all_from_collection(collection_name: str) -> List[Dict[str,Any]]:
-    """Retrieves all documents from a specified collection."""
+def get_all_from_collection(collection_name: str) -> List[Dict[str, Any]]:
+    """Retrieves all documents from a specified Firestore collection."""
     if not db:
-        return
+        return []
     ref = db.collection(collection_name)
     docs = ref.stream()
     return [doc.to_dict() for doc in docs]
 
-# Add these new functions
 def get_all_teams() -> List[Dict[str, Any]]:
-    """ Retrieves all teams from the 'teams' collection in Firestore """
+    """Retrieves all team documents from the 'teams' collection."""
     if not db:
         return []
-    docs = db.collection('teams').stream()
+    docs = db.collection("teams").stream()
     return [doc.to_dict() for doc in docs]
 
 def get_all_gameweeks() -> List[Dict[str, Any]]:
-    """ Retrieves all gameweeks from the 'gameweeks' collection in Firestore """
+    """Retrieves all gameweek documents from the 'gameweeks' collection."""
     if not db:
         return []
-    docs = db.collection('gameweeks').stream()
+    docs = db.collection("gameweeks").stream()
     return [doc.to_dict() for doc in docs]
 
-# Add this new function
 def get_current_gameweek() -> Optional[int]:
-    """
-    Retrieves the ID of the current gameweek from the 'gameweeks' collection.
-    Assumes gameweeks have an 'is_current' field.
-    """
+    """Finds and returns the ID of the current gameweek."""
     if not db:
         return None
-    
-    # Query for the gameweek where 'is_current' is true
-    current_gw_docs = db.collection('gameweeks').where('is_current', '==', True).limit(1).stream()
-    
+    current_gw_docs = db.collection("gameweeks").where("is_current", "==", True).limit(1).stream()
     for doc in current_gw_docs:
-        # Assuming the gameweek ID is stored in the 'id' field of the document
-        return doc.to_dict().get('id')
-    
-    return None # No current gameweek found
+        return doc.to_dict().get("id")
+    return None
 
 def search_players(name: str = None, team: str = None, position: str = None) -> List[Dict[str, Any]]:
     """
-    Searches for players based on name, team, and/or position.
-    The search is case-insensitive and performs partial matches on names.
+    Searches for players based on name, team name, and/or position.
+    The search is case-insensitive.
     """
-    print(f"Searching for players with name: {name}, team: {team}, position: {position}")
+    logging.info("Searching for players with name: %s, team: %s, position: %s", name, team, position)
     filtered_players = get_all_players()
     if name:
-        filtered_players = [p for p in filtered_players if name.lower() in p.get('first_name', '').lower()]
-        
+        filtered_players = [p for p in filtered_players if name.lower() in p.get("web_name", "").lower()]
+
     if team:
-        all_teams = get_all_from_collection("teams")
-        team_id = next((t['id'] for t in all_teams if t['name'].lower() == team.lower()), None)
+        all_teams = get_all_teams()
+        team_id = next((t["id"] for t in all_teams if t["name"].lower() == team.lower()), None)
         if team_id:
-            filtered_players = [p for p in filtered_players if p.get('team') == team_id]
+            filtered_players = [p for p in filtered_players if p.get("team") == team_id]
         else:
             return []
-        
+
     if position:
-        position_map = {'goalkeeper': 1, 'defender': 2, 'midfielder': 3, 'forward': 4}
+        position_map = {"goalkeeper": 1, "defender": 2, "midfielder": 3, "forward": 4}
         position_id = position_map.get(position.lower())
         if position_id:
-            filtered_players = [p for p in filtered_players if p.get('element_type') == position_id]
+            filtered_players = [p for p in filtered_players if p.get("element_type") == position_id]
         else:
             return []
-    
+
     return filtered_players
 
 def search_teams(name: str = None) -> List[Dict[str, Any]]:
     """
-    Searches for teams by name (case-insensitive, partial match).
+    Searches for teams by name with a case-insensitive, partial match.
     """
-    print(f"Searching for teams with name: {name}")
+    logging.info("Searching for teams with name: %s", name)
     all_teams = get_all_teams()
     if name:
-        return [t for t in all_teams if name.lower() in t.get('name', '').lower()]
-    else:
-        return []
-
-
-    
-    
-    
-    
+        return [t for t in all_teams if name.lower() in t.get("name", "").lower()]
+    return []

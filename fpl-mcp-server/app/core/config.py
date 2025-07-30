@@ -1,15 +1,32 @@
-#app/core/config.py
-from pydantic_settings import BaseSettings, SettingsConfigDict
-from functools import lru_cache
+# Copyright 2025 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+# Author: Anshul Kapoor
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
+"""
+This module defines the configuration settings for the FPL MCP server application.
+
+It uses Pydantic's BaseSettings to load configuration from environment variables
+or a .env file, ensuring that settings are loaded only once and cached for efficiency.
+"""
+
+from functools import lru_cache
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     """
-    Defines the applications configuration settings.
-    Pydantic automatically reads these from env varibles or .env file.
-    
-    Args:
-        BaseSettings (_type_): _description_
+    Defines the application's configuration settings.
+    Pydantic automatically reads these from environment variables or a .env file.
     """
     GCP_PROJECT_ID: str
     FPL_API_BASE_URL: str
@@ -22,8 +39,5 @@ def get_settings() -> Settings:
     """
     Returns a cached instance of the Settings object.
     Using lru_cache ensures the settings are loaded only once.
-
-    Returns:
-        Settings: settings
     """
     return Settings()

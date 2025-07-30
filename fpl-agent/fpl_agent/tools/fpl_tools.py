@@ -1,37 +1,82 @@
-import requests
-import os
-import requests
-import google.auth
-import json
-import google.oauth2.id_token
-from urllib.parse import urlparse, urlunparse
-from typing import Optional
-import pulp
+# Copyright 2025 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+# Author: Anshul Kapoor
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
+"""
+This module defines the tools available to the FPL agent.
+
+These tools interact with a backend FPL API server to fetch data about players,
+teams, fixtures, and league standings. It also includes a tool for team 
+optimization using PuLP and a Google Search tool for general queries.
+
+Key Functions:
+- get_top_performers: Fetches the top-performing players.
+- search_players: Searches for players based on various criteria.
+- get_fixtures: Retrieves match fixtures for a given gameweek.
+- search_teams: Searches for teams or lists all teams.
+- get_league_standings: Gets the current league table.
+- get_current_gameweek: Finds the current active gameweek.
+- get_optimized_fpl_team: Suggests an optimized FPL team based on constraints.
+- google_search_tool: A sub-agent for performing Google searches.
+"""
+
+import os
+import json
+import logging
+import requests
+from typing import Optional
+from urllib.parse import urlparse, urlunparse
+
+import pulp
+import google.auth
 import google.auth.transport.requests
 import google.oauth2.id_token
+from dotenv import load_dotenv
+from google.adk.agents import Agent
 from google.adk.tools import google_search
 from google.adk.tools.agent_tool import AgentTool
-from google.adk.agents import Agent
-from dotenv import load_dotenv
 
 load_dotenv()
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
-MODEL_NAME = os.getenv("ROOT_AGENT_MODEL", "gemini-2.5-flash")
+MODEL_NAME = os.getenv("ROOT_AGENT_MODEL", "gemini-1.5-flash")
 
+# A sub-agent that specializes in using Google Search.
 search_sub_agent = Agent(
     name="google_search",
     model=MODEL_NAME,
     instruction="You are a search specialist. Your only task is to use Google Search to answer the user's query.",
-    tools = [google_search])
+    tools=[google_search]
+)
 
+# An AgentTool that wraps the search sub-agent, making it available to the main agent.
 google_search_tool = AgentTool(
-    search_sub_agent
+    agent=search_sub_agent
 )
 
 def _get_authenticated_headers():
     """
-    Generates authentication headers and the correct base API URL for the MCP server.
+    Constructs authentication headers for making requests to the MCP server.
+
+    This function retrieves the server URL and API key from environment variables.
+    It attempts to generate a Google-signed ID token for authentication.
+
+    Returns:
+        A tuple containing the headers dictionary and the base API URL.
+
+    Raises:
+        ValueError: If the required environment variables are not set.
     """
     mcp_server_url_from_env = os.getenv("MCP_SERVER_URL")
     api_key = os.getenv("MCP_API_KEY")
@@ -39,48 +84,37 @@ def _get_authenticated_headers():
     if not mcp_server_url_from_env or not api_key:
         raise ValueError("MCP_SERVER_URL and MCP_API_KEY environment variables must be set.")
 
-    # CORRECTED: Robustly construct the base URL and API path
     parsed_url = urlparse(mcp_server_url_from_env)
     base_url = urlunparse((parsed_url.scheme, parsed_url.netloc, '', '', '', ''))
     api_base_url = f"{base_url}/api/v1"
 
-    debug_info = f"Attempting to auth with API base at {api_base_url}. "
     headers = {"Content-Type": "application/json", "X-API-Key": api_key}
 
     try:
-        # The audience for the ID token should be the base URL
         creds, project = google.auth.default()
         auth_req = google.auth.transport.requests.Request()
         id_token = google.oauth2.id_token.fetch_id_token(auth_req, base_url)
         headers["Authorization"] = f"Bearer {id_token}"
-        debug_info += "Successfully generated Google-signed ID token."
+        logging.info("Successfully generated Google-signed ID token for API requests.")
     except Exception as e:
-        debug_info += f"Could not generate Google-signed ID token: {e}."
+        logging.warning("Could not generate Google-signed ID token: %s. Proceeding with API key only.", e)
 
-    return headers, api_base_url, debug_info
-    
-
+    return headers, api_base_url
 
 def get_top_performers() -> str:
     """
-    Retrieves the top 10 performing players from the FPL server by fetching all players
-    and sorting them by their total points. Use this when a user asks for "top performers",
-    "best players", or "who has the most points".
+    Retrieves the top 10 performing FPL players based on total points.
 
     Returns:
-        A JSON string containing the list of the top 10 performing players.
+        A JSON string representing a list of the top 10 players.
     """
-    debug_info = "Initializing..."
-    headers = {}
     try:
-        headers, mcp_server_url, debug_info = _get_authenticated_headers()
+        headers, mcp_server_url = _get_authenticated_headers()
         api_url = f"{mcp_server_url}/players/"
-        debug_info += f"Sending headers for get_top_performers: {headers}\n"
         response = requests.get(api_url, headers=headers)
         response.raise_for_status()
         
         all_players = response.json()
-
         top_10_performers = sorted(
             all_players,
             key=lambda p: p.get('total_points', 0),
@@ -89,52 +123,54 @@ def get_top_performers() -> str:
         
         return json.dumps(top_10_performers, indent=2)
         
-    except Exception as e: # Catch all exceptions here to include debug_info
-        error_message = f"An error occurred while getting top performers: {e}"
-        return f"{error_message}\n---DEBUG INFO---\n{debug_info}"
-    
+    except Exception as e:
+        logging.error("Error getting top performers: %s", e)
+        return json.dumps({"error": f"An error occurred while getting top performers: {e}"})
+
 def search_players(name: str = "", team: str = "", position: str = "") -> str:
     """
-    Searches for players using a name, team, or position. At least one parameter must be provided.
-    All search parameters are case-insensitive.
+    Searches for FPL players by name, team, or position.
+
+    Args:
+        name: The name of the player to search for.
+        team: The team the player belongs to.
+        position: The player's position (e.g., 'Forward').
+
+    Returns:
+        A JSON string of matching players.
     """
-    params = {
-        'name': name,
-        'team': team,
-        'position': position
-    }
+    params = {'name': name, 'team': team, 'position': position}
     query_params = {k: v for k, v in params.items() if v}
-    debug_info = "Initializing Search Players..."
     
     if not query_params:
-        return "Error: You must provide at least one search criteria (name, team, or position)."
+        return json.dumps({"error": "You must provide at least one search criteria (name, team, or position)."})
     try:
-        headers, mcp_server_url, debug_info = _get_authenticated_headers()
+        headers, mcp_server_url = _get_authenticated_headers()
         api_url = f"{mcp_server_url}/players/search/"
-        debug_info += f"Sending headers for search_players: {headers}\n"
         response = requests.get(api_url, params=query_params, headers=headers)
         response.raise_for_status()
         return json.dumps(response.json(), indent=2)
-    except Exception as e: # Catch all exceptions here to include debug_info
-        error_message = f"An error occurred while searching for players: {e}"
-        return f"{error_message}\n---DEBUG INFO---\n{debug_info}"
-    
+    except Exception as e:
+        logging.error("Error searching for players: %s", e)
+        return json.dumps({"error": f"An error occurred while searching for players: {e}"})
+
 def get_fixtures(gameweek: Optional[int] = None) -> str:
     """
-    Retrieves FPL fixtures. If a specific gameweek number is provided, it fetches
-    fixtures for that week. If no gameweek is provided, it fetches fixtures
-    for the current gameweek and the next two weeks.
+    Retrieves FPL fixtures for a specific gameweek or the upcoming weeks.
+
     Args:
-        gameweek (Optional[int]): The gameweek number to fetch fixtures for.
+        gameweek: The gameweek number. If None, fetches for the current and next two gameweeks.
+
+    Returns:
+        A JSON string of the fixtures.
     """
     try:
-        headers, mcp_server_url, _ = _get_authenticated_headers()
+        headers, mcp_server_url = _get_authenticated_headers()
         
         gameweeks_to_fetch = []
         if gameweek is not None:
             gameweeks_to_fetch.append(gameweek)
         else:
-            # If no gameweek is provided, get the current and next two.
             current_gw_str = get_current_gameweek()
             current_gw_data = json.loads(current_gw_str)
             current_gw_num = current_gw_data.get("current_gameweek")
@@ -145,7 +181,6 @@ def get_fixtures(gameweek: Optional[int] = None) -> str:
             gameweeks_to_fetch = [current_gw_num, current_gw_num + 1, current_gw_num + 2]
 
         all_fixtures = {}
-        # CORRECTED: This loop correctly iterates through the gameweeks to fetch.
         for gw in gameweeks_to_fetch:
             api_url = f"{mcp_server_url}/fixtures/"
             params = {"gameweek": gw}
@@ -156,18 +191,21 @@ def get_fixtures(gameweek: Optional[int] = None) -> str:
         return json.dumps(all_fixtures, indent=2)
 
     except Exception as e:
-        return f"An error occurred while fetching fixtures: {e}"
+        logging.error("Error fetching fixtures: %s", e)
+        return json.dumps({"error": f"An error occurred while fetching fixtures: {e}"})
 
-def search_teams(name: str ="") -> str:
+def search_teams(name: str = "") -> str:
     """
-    Searches for a specific team by its name. If no name is provided,
-    it returns a list of all teams.
+    Searches for a specific FPL team by name or lists all teams.
+
     Args:
-        name (str): The name of the team to search for.
+        name: The name of the team. If empty, all teams are returned.
+
+    Returns:
+        A JSON string of the matching team(s).
     """
-    debug_info = "Initializing."
     try:
-        headers, api_base_url, debug_info = _get_authenticated_headers()
+        headers, api_base_url = _get_authenticated_headers()
         if name:
             api_url = f"{api_base_url}/teams/search/"
             params = {"name": name}
@@ -176,40 +214,42 @@ def search_teams(name: str ="") -> str:
             api_url = f"{api_base_url}/teams/"
             response = requests.get(api_url, headers=headers)
         response.raise_for_status()
-        return response.json()
+        return json.dumps(response.json(), indent=2)
     except Exception as e:
-        return f"An error occurred while searching for teams: {e}\n---DEBUG INFO---\n{debug_info}"
-
+        logging.error("Error searching for teams: %s", e)
+        return json.dumps({"error": f"An error occurred while searching for teams: {e}"})
 
 def get_league_standings() -> str:
     """
-    Retrieves the current FPL league standings. Use this to find out
-    team positions, who is at the top, or who is at the bottom.
+    Retrieves the current FPL league standings.
+
+    Returns:
+        A JSON string of the league standings.
     """
     try:
-        headers, api_base_url, _ = _get_authenticated_headers()
+        headers, api_base_url = _get_authenticated_headers()
         api_url = f"{api_base_url}/standings/league"
         response = requests.get(api_url, headers=headers)
         response.raise_for_status()
-        
         return json.dumps(response.json(), indent=2)
-
     except Exception as e:
-        return f"An error occurred while fetching league standings: {e}"
+        logging.error("Error fetching league standings: %s", e)
+        return json.dumps({"error": f"An error occurred while fetching league standings: {e}"})
 
 def get_current_gameweek() -> str:
     """
-    Retrieves the current active Fantasy Premier League gameweek number
-    by fetching all gameweeks and finding the one marked as current.
+    Retrieves the current active FPL gameweek number.
+
+    Returns:
+        A JSON string containing the current gameweek number.
     """
     try:
-        headers, api_base_url, _ = _get_authenticated_headers()
+        headers, api_base_url = _get_authenticated_headers()
         api_url = f"{api_base_url}/gameweeks/"
         response = requests.get(api_url, headers=headers)
         response.raise_for_status()
         gameweeks = response.json()
         
-        # Find the gameweek that is the current one
         for gw in gameweeks:
             if gw.get('is_current'):
                 return json.dumps({"current_gameweek": gw.get('id')})
@@ -217,38 +257,35 @@ def get_current_gameweek() -> str:
         return json.dumps({"error": "Could not determine the current gameweek."})
 
     except Exception as e:
-        return f"An error occurred: {e}"
-    
+        logging.error("Error getting current gameweek: %s", e)
+        return json.dumps({"error": f"An error occurred: {e}"})
+
 def get_optimized_fpl_team(formation: str = "4-4-2", budget: int = 100) -> str:
     """
-    Selects an optimized FPL team based on player form, cost, and fixture
-    difficulty for a given formation and budget.
+    Selects an optimized FPL team based on player form, cost, and formation.
+
     Args:
-        formation (str): The desired team formation (e.g., "4-4-2", "3-5-2").
-        budget (int): The total budget in millions (e.g., 100).
+        formation: The desired team formation (e.g., "4-4-2").
+        budget: The total budget in millions (e.g., 100).
+
+    Returns:
+        A JSON string of the optimized team.
     """
     try:
-        # 1. Fetch all available players from the API
-        headers, api_base_url, _ = _get_authenticated_headers()
+        headers, api_base_url = _get_authenticated_headers()
         players_url = f"{api_base_url}/players/"
         response = requests.get(players_url, headers=headers)
         response.raise_for_status()
         players = response.json()
         
-        # Filter for players who are available and have complete data
         players = [p for p in players if p.get('status') == 'a' and p.get('form') and p.get('cost')]
 
-        # 2. PuLP Optimization Logic (adapted from your code)
         prob = pulp.LpProblem("FPL_Team_Selection", pulp.LpMaximize)
         player_vars = pulp.LpVariable.dicts("player", [p['id'] for p in players], cat='Binary')
 
-        # Objective: Maximize form
         prob += pulp.lpSum([float(p['form']) * player_vars[p['id']] for p in players])
+        prob += pulp.lpSum([p['cost'] * player_vars[p['id']] for p in players]) <= budget * 10 # Budget is in millions
 
-        # Constraints
-        prob += pulp.lpSum([p['cost'] * player_vars[p['id']] for p in players]) <= budget
-        
-        # Positional constraints based on formation
         formation_map = {
             "4-4-2": {"Goalkeeper": 1, "Defender": 4, "Midfielder": 4, "Forward": 2},
             "4-5-1": {"Goalkeeper": 1, "Defender": 4, "Midfielder": 5, "Forward": 1},
@@ -257,7 +294,7 @@ def get_optimized_fpl_team(formation: str = "4-4-2", budget: int = 100) -> str:
             "4-3-3": {"Goalkeeper": 1, "Defender": 4, "Midfielder": 3, "Forward": 3},
         }
         
-        squad_size = 11 # For the starting XI
+        squad_size = 11
         if formation not in formation_map:
             return json.dumps({"error": f"Formation {formation} not supported. Please choose from {list(formation_map.keys())}"})
             
@@ -265,7 +302,6 @@ def get_optimized_fpl_team(formation: str = "4-4-2", budget: int = 100) -> str:
         for pos, count in formation_map[formation].items():
              prob += pulp.lpSum([player_vars[p['id']] for p in players if p['position'] == pos]) == count
 
-        # Team constraint (max 3 players from one team)
         team_ids = set(p['team'] for p in players)
         for team_id in team_ids:
             prob += pulp.lpSum([player_vars[p['id']] for p in players if p['team'] == team_id]) <= 3
@@ -273,9 +309,8 @@ def get_optimized_fpl_team(formation: str = "4-4-2", budget: int = 100) -> str:
         prob.solve(pulp.PULP_CBC_CMD(msg=False))
         
         if pulp.LpStatus[prob.status] != 'Optimal':
-            return json.dumps({"error": "Could not find an optimal team for the given budget and formation. Please try a different formation or a higher budget."})
+            return json.dumps({"error": "Could not find an optimal team for the given budget and formation."})
 
-        # 3. Format the result
         selected_players_output = {
             "formation": formation,
             "Goalkeepers": [], "Defenders": [], "Midfielders": [], "Forwards": []
@@ -294,4 +329,5 @@ def get_optimized_fpl_team(formation: str = "4-4-2", budget: int = 100) -> str:
         return json.dumps(selected_players_output, indent=2)
 
     except Exception as e:
-        return f"An error occurred while optimizing the team: {e}"
+        logging.error("Error optimizing team: %s", e)
+        return json.dumps({"error": f"An error occurred while optimizing the team: {e}"})

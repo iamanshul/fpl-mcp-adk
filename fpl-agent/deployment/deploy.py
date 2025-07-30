@@ -5,6 +5,7 @@
 # You may obtain a copy of the License at
 #
 #     http://www.apache.org/licenses/LICENSE-2.0
+# Author: Anshul Kapoor
 #
 # Unless required by applicable law or agreed to in writing, software
 # distributed under the License is distributed on an "AS IS" BASIS,
@@ -12,7 +13,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Deployment script for FPL agent."""
+"""
+Deployment script for the Fantasy Premier League (FPL) agent to Google Cloud Vertex AI.
+
+This script handles the creation, deletion, and management of the FPL agent 
+as a Vertex AI Agent Engine. It uses the AdkApp framework for deployment.
+
+Key Functions:
+- setup_staging_bucket: Prepares a Google Cloud Storage bucket for deployment artifacts.
+- create: Packages and deploys the agent to Vertex AI.
+- delete: Removes a deployed agent from Vertex AI.
+- main: Parses command-line arguments to orchestrate the deployment process.
+"""
 
 import logging
 import os
@@ -31,7 +43,7 @@ flags.DEFINE_string("project_id", None, "GCP project ID.")
 flags.DEFINE_string("location", None, "GCP location.")
 flags.DEFINE_string(
     "bucket", None, "GCP bucket name (without gs:// prefix)."
-)  # Changed flag description
+)
 flags.DEFINE_string("resource_id", None, "ReasoningEngine resource ID.")
 
 flags.DEFINE_bool("create", False, "Create a new agent.")
@@ -41,7 +53,7 @@ flags.mark_bool_flags_as_mutual_exclusive(["create", "delete"])
 AGENT_WHL_FILE = "deployment/fpl_agent-0.1-py3-none-any.whl"
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 
@@ -49,7 +61,7 @@ def setup_staging_bucket(
     project_id: str, location: str, bucket_name: str
 ) -> str:
     """
-    Checks if the staging bucket exists, creates it if not.
+    Checks if the staging bucket exists and creates it if it doesn't.
 
     Args:
         project_id: The GCP project ID.
@@ -64,7 +76,6 @@ def setup_staging_bucket(
     """
     storage_client = storage.Client(project=project_id)
     try:
-        # Check if the bucket exists
         bucket = storage_client.lookup_bucket(bucket_name)
         if bucket:
             logger.info("Staging bucket gs://%s already exists.", bucket_name)
@@ -72,7 +83,6 @@ def setup_staging_bucket(
             logger.info(
                 "Staging bucket gs://%s not found. Creating...", bucket_name
             )
-            # Create the bucket if it doesn't exist
             new_bucket = storage_client.create_bucket(
                 bucket_name, project=project_id, location=location
             )
@@ -81,7 +91,6 @@ def setup_staging_bucket(
                 new_bucket.name,
                 location,
             )
-            # Enable uniform bucket-level access for simplicity
             new_bucket.iam_configuration.uniform_bucket_level_access_enabled = (
                 True
             )
@@ -93,24 +102,17 @@ def setup_staging_bucket(
 
     except google_exceptions.Forbidden as e:
         logger.error(
-            (
-                "Permission denied error for bucket gs://%s. "
-                "Ensure the service account has 'Storage Admin' role. Error: %s"
-            ),
+            "Permission denied for bucket gs://%s. Ensure the service account has 'Storage Admin' role. Error: %s",
             bucket_name,
             e,
         )
         raise
     except google_exceptions.Conflict as e:
         logger.warning(
-            (
-                "Bucket gs://%s likely already exists but owned by another "
-                "project or recently deleted. Error: %s"
-            ),
+            "Bucket gs://%s likely already exists but is owned by another project or was recently deleted. Error: %s",
             bucket_name,
             e,
         )
-        # Assuming we can proceed if it exists, even with a conflict warning
     except google_exceptions.ClientError as e:
         logger.error(
             "Failed to create or access bucket gs://%s. Error: %s",
@@ -123,15 +125,16 @@ def setup_staging_bucket(
 
 
 def create(env_vars: dict[str, str]) -> None:
-    """Creates and deploys the agent."""
+    """
+    Packages the agent, defines its dependencies, and deploys it to Vertex AI Agent Engines.
+    """
     adk_app = AdkApp(
         agent=root_agent,
         enable_tracing=False,
     )
 
     if not os.path.exists(AGENT_WHL_FILE):
-        logger.error("Agent wheel file not found at: %s", AGENT_WHL_FILE)
-        # Consider adding instructions here on how to build the wheel file
+        logger.error("Agent wheel file not found at: %s. Please build the wheel file first.", AGENT_WHL_FILE)
         raise FileNotFoundError(f"Agent wheel file not found: {AGENT_WHL_FILE}")
 
     logger.info("Using agent wheel file: %s", AGENT_WHL_FILE)
@@ -148,58 +151,46 @@ def create(env_vars: dict[str, str]) -> None:
         env_vars=env_vars
     )
     
-    
     logger.info("Created remote agent: %s", remote_agent.resource_name)
-    print(f"\nSuccessfully created agent: {remote_agent.resource_name}")
+    logger.info("Successfully created agent: %s", remote_agent.resource_name)
 
 
 def delete(resource_id: str) -> None:
-    """Deletes the specified agent."""
+    """
+    Deletes the specified agent from Vertex AI.
+    """
     logger.info("Attempting to delete agent: %s", resource_id)
     try:
         remote_agent = agent_engines.get(resource_id)
         remote_agent.delete(force=True)
         logger.info("Successfully deleted remote agent: %s", resource_id)
-        print(f"\nSuccessfully deleted agent: {resource_id}")
     except google_exceptions.NotFound:
         logger.error("Agent with resource ID %s not found.", resource_id)
-        print(f"\nAgent{resource_id} not found.")
-        print(f"\nAgent not found: {resource_id}")
     except Exception as e:
         logger.error(
             "An error occurred while deleting agent %s: %s", resource_id, e
         )
-        print(f"\nError deleting agent {resource_id}: {e}")
 
 
-def main(argv: list[str]) -> None:  # pylint: disable=unused-argument
-    """Main execution function."""
+def main(argv: list[str]) -> None:
+    """
+    Main execution function. Parses command-line flags and orchestrates the 
+    deployment or deletion of the agent. It also handles environment variable
+    loading and validation.
+    """
     load_dotenv()
     env_vars = {}
 
-    project_id = (
-        FLAGS.project_id
-        if FLAGS.project_id
-        else os.getenv("GOOGLE_CLOUD_PROJECT")
-    )
-    location = (
-        FLAGS.location if FLAGS.location else os.getenv("GOOGLE_CLOUD_LOCATION")
-    )
-    # Default bucket name convention if not provided
+    project_id = FLAGS.project_id or os.getenv("GOOGLE_CLOUD_PROJECT")
+    location = FLAGS.location or os.getenv("GOOGLE_CLOUD_LOCATION")
     default_bucket_name = f"{project_id}-adk-staging" if project_id else None
-    bucket_name = (
-        FLAGS.bucket
-        if FLAGS.bucket
-        else os.getenv("GOOGLE_CLOUD_STORAGE_BUCKET", default_bucket_name)
-    )
-    # Don't set "GOOGLE_CLOUD_PROJECT" or "GOOGLE_CLOUD_LOCATION"
-    # when deploying to Agent Engine. Those are set by the backend.
+    bucket_name = FLAGS.bucket or os.getenv("GOOGLE_CLOUD_STORAGE_BUCKET", default_bucket_name)
+    
+    # Environment variables for the deployed agent
     env_vars["FPL_TEAM_ID"] = os.getenv("FPL_TEAM_ID")
     env_vars["ROOT_AGENT_MODEL"] = os.getenv("ROOT_AGENT_MODEL")
     env_vars["MCP_SERVER_URL"] = os.getenv("MCP_SERVER_URL")
-    env_vars["MCP_API_KEY"] = os.getenv("MCP_API_KEY") # 3. Add the API Key
-
-    
+    env_vars["MCP_API_KEY"] = os.getenv("MCP_API_KEY")
 
     logger.info("Using PROJECT: %s", project_id)
     logger.info("Using LOCATION: %s", location)
@@ -207,46 +198,33 @@ def main(argv: list[str]) -> None:  # pylint: disable=unused-argument
 
     # --- Input Validation ---
     if not project_id:
-        print("\nError: Missing required GCP Project ID.")
-        print(
-            "Set the GOOGLE_CLOUD_PROJECT environment variable or use --project_id flag."
-        )
+        logger.error("Missing required GCP Project ID. Set GOOGLE_CLOUD_PROJECT or use --project_id.")
         return
     if not location:
-        print("\nError: Missing required GCP Location.")
-        print(
-            "Set the GOOGLE_CLOUD_LOCATION environment variable or use --location flag."
-        )
+        logger.error("Missing required GCP Location. Set GOOGLE_CLOUD_LOCATION or use --location.")
         return
     if not bucket_name:
-        print("\nError: Missing required GCS Bucket Name.")
-        print(
-            "Set the GOOGLE_CLOUD_STORAGE_BUCKET environment variable or use --bucket flag."
-        )
+        logger.error("Missing required GCS Bucket Name. Set GOOGLE_CLOUD_STORAGE_BUCKET or use --bucket.")
         return
     if not FLAGS.create and not FLAGS.delete:
-        print("\nError: You must specify either --create or --delete flag.")
+        logger.error("You must specify either --create or --delete flag.")
         return
     if FLAGS.delete and not FLAGS.resource_id:
-        print(
-            "\nError: --resource_id is required when using the --delete flag."
-        )
+        logger.error("--resource_id is required when using the --delete flag.")
         return
     # --- End Input Validation ---
 
     try:
-        # Setup staging bucket
-        staging_bucket_uri=None
+        staging_bucket_uri = None
         if FLAGS.create:
             staging_bucket_uri = setup_staging_bucket(
                 project_id, location, bucket_name
             )
 
-        # Initialize Vertex AI *after* bucket setup and validation
         vertexai.init(
             project=project_id,
             location=location,
-            staging_bucket=staging_bucket_uri,  # Staging bucket is passed directly to create/update methods now
+            staging_bucket=staging_bucket_uri,
         )
 
         if FLAGS.create:
@@ -255,25 +233,14 @@ def main(argv: list[str]) -> None:  # pylint: disable=unused-argument
             delete(FLAGS.resource_id)
 
     except google_exceptions.Forbidden as e:
-        print(
-            "Permission Error: Ensure the service account/user has necessary "
-            "permissions (e.g., Storage Admin, Vertex AI User)."
-            f"\nDetails: {e}"
+        logger.error(
+            "Permission Error: Ensure the service account/user has necessary permissions (e.g., Storage Admin, Vertex AI User). Details: %s", e
         )
     except FileNotFoundError as e:
-        print(f"\nFile Error: {e}")
-        print(
-            "Please ensure the agent wheel file exists in the 'deployment' "
-            "directory and you have run the build script "
-            "(e.g., poetry build --format=wheel --output=deployment')."
-        )
+        logger.error("File Error: %s. Ensure the agent wheel file exists in the 'deployment' directory.", e)
     except Exception as e:
-        print(f"\nAn unexpected error occurred: {e}")
-        logger.exception(
-            "Unhandled exception in main:"
-        )  # Log the full traceback
+        logger.exception("An unexpected error occurred in main: %s", e)
 
 
 if __name__ == "__main__":
-
     app.run(main)
