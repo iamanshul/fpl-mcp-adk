@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, forwardRef } from 'react';
 
-const Input = ({ onSendMessage, disabled }) => {
+const Input = forwardRef(({ onSendMessage, disabled }, ref) => {
     const [text, setText] = useState('');
 
     const handleSubmit = (e) => {
@@ -14,6 +14,7 @@ const Input = ({ onSendMessage, disabled }) => {
     return (
         <form onSubmit={handleSubmit} className="flex items-center p-4">
             <input
+                ref={ref}
                 type="text"
                 value={text}
                 onChange={(e) => setText(e.target.value)}
@@ -26,6 +27,6 @@ const Input = ({ onSendMessage, disabled }) => {
             </button>
         </form>
     );
-};
+});
 
 export default Input;

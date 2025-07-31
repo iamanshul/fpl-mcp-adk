@@ -60,9 +60,13 @@ The FPL MCP Server is a high-performance FastAPI application designed to be the 
     ```
 
 4.  **Build and Deploy to Cloud Run:**
+    This step uses a helper script to build the Docker image using Google Cloud Build and then deploy the new image to Cloud Run. The script handles all the necessary configuration and flags.
+
+    Navigate to the `deployment` directory and run the script:
     ```bash
-    chmod +x deployment/deploy.sh
-    ./deployment/deploy.sh
+    cd deployment
+    chmod +x deploy.sh
+    ./deploy.sh
     ```
     Note the URL of your deployed Cloud Run service.
 
@@ -178,6 +182,8 @@ The `fpl-backend` is a lightweight Flask application that serves as an intermedi
     LOCATION="your-gcp-region"
     AGENT_ENGINE_ID="YOUR_FPL_AGENT_RESOURCE_ID"
     ```
+
+    **Important:** Whenever you create a new FPL Agent, you must update the `AGENT_ENGINE_ID` in this file with the new `resource_id`.
 
 3.  **Build and Deploy to Cloud Run:**
     You will need a `Dockerfile` and a deployment script. You can adapt the ones from the `fpl-mcp-server`.

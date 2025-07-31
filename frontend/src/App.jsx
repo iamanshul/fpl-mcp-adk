@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Chat from './components/Chat.jsx';
 import Input from './components/Input.jsx';
 import { createSession, postMessage } from './services/api.js';
@@ -9,6 +9,20 @@ const App = () => {
     const [sessionId, setSessionId] = useState(null);
     const [userId, setUserId] = useState(null);
     const [isLoading, setIsLoading] = useState(false);
+    const chatEndRef = useRef(null);
+    const inputRef = useRef(null);
+
+    // Effect for auto-scrolling
+    useEffect(() => {
+        chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, [messages]);
+
+    // Effect for focusing input
+    useEffect(() => {
+        if (!isLoading) {
+            inputRef.current?.focus();
+        }
+    }, [isLoading]);
 
     useEffect(() => {
         const initSession = async () => {
@@ -17,7 +31,9 @@ const App = () => {
             try {
                 const session = await createSession(newUserId);
                 setSessionId(session.session_id);
-                setMessages([{ sender: 'agent', text: 'Hello! I am The Gaffer, your FPL expert. How can I help?' }]);
+                // Ask the agent for a joke to start the session
+                const data = await postMessage(newUserId, session.session_id, "Tell me a one-line football (soccer) joke.");
+                setMessages([{ sender: 'agent', text: data.response }]);
             } catch (error) {
                 console.error("Initialization Failed:", error);
                 setMessages([{ sender: 'agent', text: 'Error: Could not connect to the agent backend. Please ensure the backend server is running.' }]);
@@ -50,11 +66,12 @@ const App = () => {
                 <img src={logo} alt="FPL Logo" className="w-2/5" />
             </header>
             <main className="flex-1 flex flex-col items-center overflow-hidden w-full">
-                <div className="w-full max-w-4xl flex-1 flex flex-col overflow-y-auto p-4 border border-neutral-700 rounded-lg shadow-lg bg-neutral-900">
+                <div className={`w-full max-w-4xl flex-1 flex flex-col overflow-y-auto p-4 border border-neutral-700 rounded-lg shadow-lg bg-neutral-900 ${messages.length <= 1 ? 'justify-center' : ''}`}>
                     <div className="chat-container flex-1">
-                        <Chat messages={messages} />
+                        <Chat messages={messages} isLoading={isLoading} />
+                        <div ref={chatEndRef} />
                     </div>
-                    <Input onSendMessage={handleSendMessage} disabled={isLoading} />
+                    <Input ref={inputRef} onSendMessage={handleSendMessage} disabled={isLoading} />
                 </div>
             </main>
         </div>

@@ -195,6 +195,10 @@ class Gameweek(BaseModel):
     overrides: Optional[Dict[str, Any]] = None
     model_config = SharedModelConfig
 
+class CurrentGameweek(BaseModel):
+    """A simple schema to return the current gameweek ID."""
+    current_gameweek: int
+
 class PlayerContext(Player):
     """
     A specialized schema for the MCP context endpoint.

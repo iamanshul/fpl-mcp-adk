@@ -34,6 +34,7 @@ load_dotenv()
 PROJECT_ID = os.getenv("PROJECT_ID")
 GCP_LOCATION = os.getenv("LOCATION")
 AGENT_ENGINE_ID = os.getenv("AGENT_ENGINE_ID")
+print(f"Attempting to initialize Agent Engine with ID: {AGENT_ENGINE_ID}")
 
 # --- INITIALIZATION ---
 app = Flask(__name__)

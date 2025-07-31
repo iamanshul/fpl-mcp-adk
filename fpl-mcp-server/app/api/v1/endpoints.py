@@ -25,17 +25,44 @@ for providing rich context to AI agents.
 import logging
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
 from fastapi.security.api_key import APIKeyHeader
 from starlette.concurrency import run_in_threadpool
 
 from app.core.config import get_settings
 from app.crud import crud_fpl
 from app.schemas import fpl_schemas
-from app.services.fpl_sync import sync_all_fpl_data
+from app.services.fpl_sync import sync_all_fpl_data, _is_data_stale
 
 settings = get_settings()
-router = APIRouter()
+
+# Global lock to prevent multiple concurrent syncs
+SYNC_IN_PROGRESS = False
+
+# Dependency to check for data staleness
+async def check_data_staleness(background_tasks: BackgroundTasks):
+    """Dependency that checks if the FPL data is stale and triggers a background sync if needed."""
+    global SYNC_IN_PROGRESS
+    if SYNC_IN_PROGRESS:
+        logging.info("Sync already in progress. Skipping check.")
+        return
+
+    if await run_in_threadpool(_is_data_stale, 'players'):
+        logging.warning("Data is stale. Triggering background sync.")
+        SYNC_IN_PROGRESS = True
+        background_tasks.add_task(run_sync_with_lock)
+
+async def run_sync_with_lock():
+    """Wrapper to run the sync and ensure the lock is always released."""
+    global SYNC_IN_PROGRESS
+    try:
+        await run_in_threadpool(sync_all_fpl_data)
+    finally:
+        SYNC_IN_PROGRESS = False
+        logging.info("Sync finished and lock released.")
+
+# Apply the dependency to the main router for all data-providing endpoints
+router = APIRouter(dependencies=[Depends(check_data_staleness)])
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=True)
 
 async def get_api_key(api_key: str = Depends(API_KEY_HEADER)):
@@ -102,6 +129,15 @@ def read_fixtures(gameweek: Optional[int] = Query(None, description="Filter fixt
 def read_gameweeks():
     """Retrieves all gameweek information."""
     return crud_fpl.get_all_gameweeks()
+
+
+@router.get("/gameweeks/current", response_model=fpl_schemas.CurrentGameweek, tags=["Gameweeks"])
+def read_current_gameweek():
+    """Retrieves the current or next upcoming gameweek."""
+    current_gameweek_id = crud_fpl.get_current_gameweek()
+    if current_gameweek_id is None:
+        raise HTTPException(status_code=404, detail="No current or upcoming gameweek found.")
+    return fpl_schemas.CurrentGameweek(current_gameweek=current_gameweek_id)
 
 
 @router.get("/standings/league", response_model=List[fpl_schemas.Standing], tags=["Standings"])

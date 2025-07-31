@@ -151,23 +151,52 @@ def get_all_gameweeks() -> List[Dict[str, Any]]:
     return [doc.to_dict() for doc in docs]
 
 def get_current_gameweek() -> Optional[int]:
-    """Finds and returns the ID of the current gameweek."""
+    """
+    Finds and returns the ID of the current gameweek.
+    If no gameweek is marked as current, it finds the next upcoming gameweek.
+    """
     if not db:
         return None
+
+    # First, try to find the gameweek explicitly marked as current
     current_gw_docs = db.collection("gameweeks").where("is_current", "==", True).limit(1).stream()
     for doc in current_gw_docs:
         return doc.to_dict().get("id")
-    return None
+
+    # If no gameweek is current, find the next one that hasn't finished
+    logging.warning("No current gameweek found. Searching for the next upcoming gameweek.")
+    all_gameweeks = get_all_gameweeks()
+    upcoming_gameweeks = [gw for gw in all_gameweeks if not gw.get("is_finished")]
+    
+    if not upcoming_gameweeks:
+        return None
+
+    # Sort by deadline time to find the earliest upcoming one
+    next_gameweek = sorted(upcoming_gameweeks, key=lambda gw: gw.get("deadline_time"))[0]
+    return next_gameweek.get("id")
 
 def search_players(name: str = None, team: str = None, position: str = None) -> List[Dict[str, Any]]:
     """
     Searches for players based on name, team name, and/or position.
-    The search is case-insensitive.
+    The search is case-insensitive and checks against first, second, and web names.
     """
     logging.info("Searching for players with name: %s, team: %s, position: %s", name, team, position)
-    filtered_players = get_all_players()
+    
+    # Fetch all players once, then filter in memory for flexibility
+    all_players = get_all_players()
+    filtered_players = all_players
+
     if name:
-        filtered_players = [p for p in filtered_players if name.lower() in p.get("web_name", "").lower()]
+        name_lower = name.lower()
+        # New, more flexible search logic
+        filtered_players = [
+            p for p in all_players if (
+                name_lower in p.get("web_name", "").lower() or
+                name_lower in p.get("first_name", "").lower() or
+                name_lower in p.get("second_name", "").lower() or
+                name_lower in f"{p.get('first_name', '')} {p.get('second_name', '')}".lower()
+            )
+        ]
 
     if team:
         all_teams = get_all_teams()
@@ -175,24 +204,27 @@ def search_players(name: str = None, team: str = None, position: str = None) -> 
         if team_id:
             filtered_players = [p for p in filtered_players if p.get("team") == team_id]
         else:
-            return []
+            return [] # No team found, so no players can match
 
     if position:
-        position_map = {"goalkeeper": 1, "defender": 2, "midfielder": 3, "forward": 4}
-        position_id = position_map.get(position.lower())
-        if position_id:
-            filtered_players = [p for p in filtered_players if p.get("element_type") == position_id]
-        else:
-            return []
+        # Assuming position is stored by name e.g., 'Goalkeeper', 'Defender'
+        filtered_players = [p for p in filtered_players if p.get("position", "").lower() == position.lower()]
 
     return filtered_players
 
 def search_teams(name: str = None) -> List[Dict[str, Any]]:
     """
-    Searches for teams by name with a case-insensitive, partial match.
+    Searches for teams by name, checking against full and short names.
     """
     logging.info("Searching for teams with name: %s", name)
     all_teams = get_all_teams()
-    if name:
-        return [t for t in all_teams if name.lower() in t.get("name", "").lower()]
-    return []
+    if not name:
+        return []
+
+    name_lower = name.lower()
+    return [
+        t for t in all_teams if (
+            name_lower in t.get("name", "").lower() or
+            name_lower in t.get("short_name", "").lower()
+        )
+    ]
