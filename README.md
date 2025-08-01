@@ -195,3 +195,11 @@ We welcome contributions to this project!
 ## License
 
 This project is licensed under the Apache License, Version 2.0.
+
+## Frontend Demo
+
+Below is a preview of the frontend in action. This demonstrates how a user can interact with the FPL agent to get insightful fantasy football analysis.
+
+*Note: The GIF is sped up 2x for a quicker viewing experience.*
+
+![FPL Agent Demo](./fplgif.webm)

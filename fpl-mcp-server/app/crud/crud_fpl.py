@@ -166,10 +166,11 @@ def get_current_gameweek() -> Optional[int]:
     # If no gameweek is current, find the next one that hasn't finished
     logging.warning("No current gameweek found. Searching for the next upcoming gameweek.")
     all_gameweeks = get_all_gameweeks()
-    upcoming_gameweeks = [gw for gw in all_gameweeks if not gw.get("is_finished")]
+    upcoming_gameweeks = [gw for gw in all_gameweeks if not gw.get("finished")]
     
     if not upcoming_gameweeks:
-        return None
+        logging.warning("No upcoming gameweeks found. Defaulting to Gameweek 1.")
+        return 1 #As no games are finished
 
     # Sort by deadline time to find the earliest upcoming one
     next_gameweek = sorted(upcoming_gameweeks, key=lambda gw: gw.get("deadline_time"))[0]

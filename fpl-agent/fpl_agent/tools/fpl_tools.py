@@ -37,6 +37,7 @@ import logging
 import requests
 from typing import Optional
 from urllib.parse import urlparse, urlunparse
+from datetime import datetime, timezone
 
 import pulp
 import google.auth
@@ -157,15 +158,18 @@ def search_players(name: str = "", team: str = "", position: str = "") -> str:
 def get_fixtures(gameweek: Optional[int] = None) -> str:
     """
     Retrieves FPL fixtures for a specific gameweek or the upcoming weeks.
-
     Args:
         gameweek: The gameweek number. If None, fetches for the current and next two gameweeks.
-
     Returns:
         A JSON string of the fixtures.
     """
     try:
         headers, mcp_server_url = _get_authenticated_headers()
+        # 1. Get all teams to map IDs to names
+        teams_response = requests.get(f"{mcp_server_url}/teams/", headers=headers)
+        teams_response.raise_for_status()
+        teams_data = teams_response.json()
+        team_map = {team['id']: team['name'] for team in teams_data}
         
         gameweeks_to_fetch = []
         if gameweek is not None:
@@ -180,15 +184,30 @@ def get_fixtures(gameweek: Optional[int] = None) -> str:
             
             gameweeks_to_fetch = [current_gw_num, current_gw_num + 1, current_gw_num + 2]
 
-        all_fixtures = {}
+        all_fixtures_processed = []
         for gw in gameweeks_to_fetch:
             api_url = f"{mcp_server_url}/fixtures/"
             params = {"gameweek": gw}
             response = requests.get(api_url, headers=headers, params=params)
             response.raise_for_status()
-            all_fixtures[f"Gameweek {gw}"] = response.json()
-        
-        return json.dumps(all_fixtures, indent=2)
+            for fixture in response.json():
+                try:
+                    kickoff_dt = datetime.fromisoformat(fixture['kickoff_time'].replace('Z', '+00:00'))
+                    formatted_time = kickoff_dt.strftime("%A, %b %d at %I:%M %p %Z")
+                except:
+                    formatted_time = "Date TBC"
+                all_fixtures_processed.append(
+                    {
+                        "gameweek": fixture.get('event'),
+                        "formatted_kickoff": formatted_time,
+                        "home_team": team_map.get(fixture.get('team_h'), "Unknown"),
+                        "away_team": team_map.get(fixture.get('team_a'), "Unknown"),
+                        "home_team_difficulty": fixture.get('team_h_difficulty'),
+                        "away_team_difficulty": fixture.get('team_a_difficulty')
+                    }
+                )
+                    
+        return json.dumps(all_fixtures_processed, indent=2)
 
     except Exception as e:
         logging.error("Error fetching fixtures: %s", e)
@@ -245,16 +264,10 @@ def get_current_gameweek() -> str:
     """
     try:
         headers, api_base_url = _get_authenticated_headers()
-        api_url = f"{api_base_url}/gameweeks/"
+        api_url = f"{api_base_url}/gameweeks/current"
         response = requests.get(api_url, headers=headers)
-        response.raise_for_status()
-        gameweeks = response.json()
-        
-        for gw in gameweeks:
-            if gw.get('is_current'):
-                return json.dumps({"current_gameweek": gw.get('id')})
-        
-        return json.dumps({"error": "Could not determine the current gameweek."})
+        response.raise_for_status()        
+        return json.dumps(response.json())
 
     except Exception as e:
         logging.error("Error getting current gameweek: %s", e)
