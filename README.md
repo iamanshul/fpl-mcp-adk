@@ -202,4 +202,4 @@ Below is a preview of the frontend in action. This demonstrates how a user can i
 
 *Note: The GIF is sped up 2x for a quicker viewing experience.*
 
-![FPL Agent Demo](./fplgif.webm)
+![FPL Agent Demo](./fplgif.gif)

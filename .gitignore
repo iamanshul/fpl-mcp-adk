@@ -97,3 +97,13 @@ premier_league.db # If you still have local SQLite DB files
 *.sqlite3
 *.db
 *.db-* # Matches any files like .db-wal, .db-db, .db-shm etc.
+
+# Untracked project-specific files
+.gemini/
+header_template.txt
+firestore.indexes.json
+firebase.json
+firestore.rules
+
+# Untracked nested directories
+fpl-agent/fpl-agent/
