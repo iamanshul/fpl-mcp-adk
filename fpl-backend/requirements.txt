@@ -1,0 +1,5 @@
+# fpl-backend/requirements.txt
+Flask
+Flask-Cors
+google-cloud-aiplatform>=1.55.0
+python-dotenv

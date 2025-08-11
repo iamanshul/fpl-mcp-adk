@@ -1,0 +1,10 @@
+google-adk
+requests
+python-dotenv
+
+[test]
+pytest
+pytest-asyncio
+requests-mock
+google-cloud-aiplatform[evaluation]
+google-adk[eval]

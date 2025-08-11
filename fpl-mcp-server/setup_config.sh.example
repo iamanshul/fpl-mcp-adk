@@ -1,0 +1,11 @@
+#!/bin/bash
+
+# This is an example configuration file for the GCP setup script.
+# Copy this file to setup_config.sh and fill in your specific project details.
+
+export PROJECT_ID="your-gcp-project-id"
+export REGION="us-central1"
+export REPO_NAME="fpl-mcp-repo"
+export CLOUD_BUILD_SA_EMAIL="[PROJECT_NUMBER]@cloudbuild.gserviceaccount.com"
+export SERVICE_ACCOUNT_NAME="fpl-mcp-run-sa"
+export DEPLOYING_USER_EMAIL="your-email@example.com"
